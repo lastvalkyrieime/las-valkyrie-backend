@@ -4,22 +4,40 @@ const cors = require('cors');
 
 const app = express();
 
+// CORS configuration
+app.use(cors({
+    origin: ['https://your-app-name.netlify.app', 'http://localhost:3000'],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 // Middleware
-app.use(cors());
 app.use(express.json());
 
 // Koneksi MongoDB
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/las_valkyrie';
+const MONGODB_URI = process.env.MONGODB_URI;
 
-mongoose.connect(MONGODB_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-})
-.then(() => console.log('✅ MongoDB Connected'))
-.catch(err => console.log('❌ MongoDB Connection Error:', err));
+const connectDB = async () => {
+    try {
+        await mongoose.connect(MONGODB_URI, {
+            useNewUrlParser: true,
+            useUnifiedTopology: true,
+            serverSelectionTimeoutMS: 30000,
+            socketTimeoutMS: 45000,
+        });
+        console.log('✅ MongoDB Connected Successfully');
+    } catch (error) {
+        console.error('❌ MongoDB Connection Error:', error);
+    }
+};
+
+connectDB();
 
 // Routes
 app.use('/api/products', require('./routes/products'));
+app.use('/api/orders', require('./routes/orders'));
+app.use('/api/admin', require('./routes/admin'));
 
 // Health check endpoint
 app.get('/', (req, res) => {
@@ -35,22 +53,8 @@ app.get('/', (req, res) => {
     });
 });
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-    console.error(err.stack);
-    res.status(500).json({
-        success: false,
-        error: 'Something went wrong!'
-    });
-});
-
-// 404 handler
-app.use('*', (req, res) => {
-    res.status(404).json({
-        success: false,
-        error: 'Endpoint not found'
-    });
-});
+// Handle preflight requests
+app.options('*', cors());
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
