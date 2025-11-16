@@ -4,7 +4,7 @@ const cors = require('cors');
 
 const app = express();
 
-// CORS configuration yang lebih luas
+// CORS configuration
 app.use(cors({
     origin: '*',
     credentials: true,
@@ -16,161 +16,297 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Simple in-memory database
-let products = [
-    {
-        _id: '1',
-        name: 'AK-47',
-        category: 'senjata',
-        price: 15000,
-        stock: 10,
-        description: 'Senjata assault rifle'
-    },
-    {
-        _id: '2',
-        name: 'Body Armor', 
-        category: 'armor',
-        price: 8000,
-        stock: 15,
-        description: 'Pelindung tubuh level 3'
-    },
-    {
-        _id: '3',
-        name: 'Ganja Premium',
-        category: 'ganja',
-        price: 5000,
-        stock: 20,
-        description: 'Ganja kualitas tinggi'
-    }
-];
+// MongoDB Connection
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://username:password@cluster.mongodb.net/lasvalkyrie';
 
-let orders = [];
+const connectDB = async () => {
+    try {
+        await mongoose.connect(MONGODB_URI, {
+            useNewUrlParser: true,
+            useUnifiedTopology: true,
+        });
+        console.log('✅ MongoDB Connected Successfully');
+    } catch (error) {
+        console.error('❌ MongoDB Connection Error:', error);
+        // Tetap jalankan server meski MongoDB error
+    }
+};
+
+connectDB();
+
+// MongoDB Schemas
+const productSchema = new mongoose.Schema({
+    name: { type: String, required: true },
+    category: { type: String, required: true },
+    price: { type: Number, required: true },
+    stock: { type: Number, required: true },
+    description: { type: String, default: '' }
+}, { timestamps: true });
+
+const orderSchema = new mongoose.Schema({
+    customerName: { type: String, required: true },
+    discordId: { type: String, default: '' },
+    additionalInfo: { type: String, default: '' },
+    items: [{
+        productId: String,
+        name: String,
+        price: Number,
+        quantity: Number
+    }],
+    totalPrice: { type: Number, required: true },
+    status: { type: String, default: 'pending' }
+}, { timestamps: true });
+
+const Product = mongoose.model('Product', productSchema);
+const Order = mongoose.model('Order', orderSchema);
 
 // ===== PRODUCT ROUTES =====
 // Get all products
-app.get('/api/products', (req, res) => {
-    console.log('📦 GET /api/products called');
-    res.json({
-        success: true,
-        data: products,
-        message: 'Products retrieved successfully'
-    });
+app.get('/api/products', async (req, res) => {
+    try {
+        console.log('📦 GET /api/products called');
+        
+        // Cek koneksi MongoDB
+        if (mongoose.connection.readyState !== 1) {
+            return res.status(500).json({
+                success: false,
+                error: 'Database connection failed',
+                data: getSampleProducts() // Fallback data
+            });
+        }
+        
+        const products = await Product.find().sort({ createdAt: -1 });
+        
+        res.json({
+            success: true,
+            data: products,
+            message: 'Products retrieved successfully'
+        });
+    } catch (error) {
+        console.error('❌ Error getting products:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message,
+            data: getSampleProducts() // Fallback data
+        });
+    }
 });
 
 // Add new product
-app.post('/api/products', (req, res) => {
-    console.log('➕ POST /api/products called:', req.body);
-    
-    const productData = req.body;
-    const newProduct = {
-        _id: 'prod_' + Date.now(),
-        ...productData,
-        createdAt: new Date().toISOString()
-    };
-    
-    products.push(newProduct);
-    
-    res.json({
-        success: true,
-        message: 'Product created successfully',
-        data: newProduct
-    });
+app.post('/api/products', async (req, res) => {
+    try {
+        console.log('➕ POST /api/products called:', req.body);
+        
+        const productData = req.body;
+        
+        // Cek koneksi MongoDB
+        if (mongoose.connection.readyState !== 1) {
+            return res.status(500).json({
+                success: false,
+                error: 'Database connection failed'
+            });
+        }
+        
+        const newProduct = new Product(productData);
+        const savedProduct = await newProduct.save();
+        
+        res.json({
+            success: true,
+            message: 'Product created successfully',
+            data: savedProduct
+        });
+    } catch (error) {
+        console.error('❌ Error creating product:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
 });
 
 // Update product
-app.put('/api/products/:id', (req, res) => {
-    const productId = req.params.id;
-    const productData = req.body;
-    
-    const productIndex = products.findIndex(p => p._id === productId);
-    if (productIndex !== -1) {
-        products[productIndex] = { ...products[productIndex], ...productData };
+app.put('/api/products/:id', async (req, res) => {
+    try {
+        const productId = req.params.id;
+        const productData = req.body;
+        
+        // Cek koneksi MongoDB
+        if (mongoose.connection.readyState !== 1) {
+            return res.status(500).json({
+                success: false,
+                error: 'Database connection failed'
+            });
+        }
+        
+        const updatedProduct = await Product.findByIdAndUpdate(
+            productId, 
+            productData, 
+            { new: true, runValidators: true }
+        );
+        
+        if (!updatedProduct) {
+            return res.status(404).json({
+                success: false,
+                error: 'Product not found'
+            });
+        }
+        
         res.json({
             success: true,
             message: 'Product updated successfully',
-            data: products[productIndex]
+            data: updatedProduct
         });
-    } else {
-        res.status(404).json({
+    } catch (error) {
+        console.error('❌ Error updating product:', error);
+        res.status(500).json({
             success: false,
-            error: 'Product not found'
+            error: error.message
         });
     }
 });
 
 // Delete product
-app.delete('/api/products/:id', (req, res) => {
-    const productId = req.params.id;
-    
-    const productIndex = products.findIndex(p => p._id === productId);
-    if (productIndex !== -1) {
-        const deletedProduct = products.splice(productIndex, 1)[0];
+app.delete('/api/products/:id', async (req, res) => {
+    try {
+        const productId = req.params.id;
+        
+        // Cek koneksi MongoDB
+        if (mongoose.connection.readyState !== 1) {
+            return res.status(500).json({
+                success: false,
+                error: 'Database connection failed'
+            });
+        }
+        
+        const deletedProduct = await Product.findByIdAndDelete(productId);
+        
+        if (!deletedProduct) {
+            return res.status(404).json({
+                success: false,
+                error: 'Product not found'
+            });
+        }
+        
         res.json({
             success: true,
             message: 'Product deleted successfully',
             data: deletedProduct
         });
-    } else {
-        res.status(404).json({
+    } catch (error) {
+        console.error('❌ Error deleting product:', error);
+        res.status(500).json({
             success: false,
-            error: 'Product not found'
+            error: error.message
         });
     }
 });
 
 // ===== ORDER ROUTES =====
 // Create new order
-app.post('/api/orders', (req, res) => {
-    console.log('🛒 POST /api/orders called:', req.body);
-    
-    const orderData = req.body;
-    const newOrder = {
-        _id: 'order_' + Date.now(),
-        ...orderData,
-        createdAt: new Date().toISOString()
-    };
-    
-    orders.push(newOrder);
-    
-    res.json({
-        success: true,
-        message: 'Order created successfully',
-        data: newOrder
-    });
+app.post('/api/orders', async (req, res) => {
+    try {
+        console.log('🛒 POST /api/orders called:', req.body);
+        
+        const orderData = req.body;
+        
+        // Cek koneksi MongoDB
+        if (mongoose.connection.readyState !== 1) {
+            return res.status(500).json({
+                success: false,
+                error: 'Database connection failed'
+            });
+        }
+        
+        const newOrder = new Order(orderData);
+        const savedOrder = await newOrder.save();
+        
+        res.json({
+            success: true,
+            message: 'Order created successfully',
+            data: savedOrder
+        });
+    } catch (error) {
+        console.error('❌ Error creating order:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
 });
 
 // Get all orders (admin)
-app.get('/api/orders', (req, res) => {
-    console.log('📋 GET /api/orders called');
-    res.json({
-        success: true,
-        data: orders,
-        message: 'Orders retrieved successfully'
-    });
+app.get('/api/orders', async (req, res) => {
+    try {
+        console.log('📋 GET /api/orders called');
+        
+        // Cek koneksi MongoDB
+        if (mongoose.connection.readyState !== 1) {
+            return res.status(500).json({
+                success: false,
+                error: 'Database connection failed',
+                data: []
+            });
+        }
+        
+        const orders = await Order.find().sort({ createdAt: -1 });
+        
+        res.json({
+            success: true,
+            data: orders,
+            message: 'Orders retrieved successfully'
+        });
+    } catch (error) {
+        console.error('❌ Error getting orders:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message,
+            data: []
+        });
+    }
 });
 
 // Update order status
-app.put('/api/orders/:id', (req, res) => {
-    const orderId = req.params.id;
-    const { status } = req.body;
-    
-    const order = orders.find(o => o._id === orderId);
-    if (order) {
-        order.status = status;
+app.put('/api/orders/:id', async (req, res) => {
+    try {
+        const orderId = req.params.id;
+        const { status } = req.body;
+        
+        // Cek koneksi MongoDB
+        if (mongoose.connection.readyState !== 1) {
+            return res.status(500).json({
+                success: false,
+                error: 'Database connection failed'
+            });
+        }
+        
+        const updatedOrder = await Order.findByIdAndUpdate(
+            orderId,
+            { status },
+            { new: true }
+        );
+        
+        if (!updatedOrder) {
+            return res.status(404).json({
+                success: false,
+                error: 'Order not found'
+            });
+        }
+        
         res.json({
             success: true,
-            message: 'Order status updated successfully'
+            message: 'Order status updated successfully',
+            data: updatedOrder
         });
-    } else {
-        res.status(404).json({
+    } catch (error) {
+        console.error('❌ Error updating order:', error);
+        res.status(500).json({
             success: false,
-            error: 'Order not found'
+            error: error.message
         });
     }
 });
 
 // ===== ADMIN ROUTES =====
-// Admin login
 app.post('/api/admin/login', (req, res) => {
     console.log('🔐 POST /api/admin/login called:', req.body);
     
@@ -191,16 +327,14 @@ app.post('/api/admin/login', (req, res) => {
 
 // Health check endpoint
 app.get('/', (req, res) => {
-    console.log('🏠 GET / called - Health check');
     res.json({
         success: true,
         message: 'Las Valkyrie API is running!',
         timestamp: new Date().toISOString(),
         environment: process.env.NODE_ENV || 'production',
         version: '2.0.0',
-        stats: {
-            products: products.length,
-            orders: orders.length
+        database: {
+            status: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
         }
     });
 });
@@ -231,11 +365,41 @@ app.use((error, req, res, next) => {
     });
 });
 
+// Fallback sample data
+function getSampleProducts() {
+    return [
+        {
+            _id: '1',
+            name: 'AK-47',
+            category: 'senjata',
+            price: 15000,
+            stock: 10,
+            description: 'Senjata assault rifle - SAMPLE DATA'
+        },
+        {
+            _id: '2',
+            name: 'Body Armor', 
+            category: 'armor',
+            price: 8000,
+            stock: 15,
+            description: 'Pelindung tubuh level 3 - SAMPLE DATA'
+        },
+        {
+            _id: '3',
+            name: 'Ganja Premium',
+            category: 'ganja',
+            price: 5000,
+            stock: 20,
+            description: 'Ganja kualitas tinggi - SAMPLE DATA'
+        }
+    ];
+}
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`📍 Health check: http://localhost:${PORT}/`);
-    console.log(`📍 Products: http://localhost:${PORT}/api/products`);
+    console.log(`📍 MongoDB Status: ${mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'}`);
 });
 
 module.exports = app;
