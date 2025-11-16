@@ -16,19 +16,24 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// MongoDB Connection
+// MongoDB Connection dengan connection string yang valid
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://lastvalkyrieime_db_user:lvime2025@lvresourcedatabase.9wth93k.mongodb.net/las_valkyrie?retryWrites=true&w=majority';
+
+console.log('🔧 Initializing MongoDB connection...');
+console.log('📝 Database: las_valkyrie');
 
 const connectDB = async () => {
     try {
         await mongoose.connect(MONGODB_URI, {
             useNewUrlParser: true,
             useUnifiedTopology: true,
+            serverSelectionTimeoutMS: 10000,
+            socketTimeoutMS: 45000,
         });
-        console.log('✅ MongoDB Connected Successfully');
+        console.log('✅ MongoDB Connected Successfully to las_valkyrie database');
     } catch (error) {
-        console.error('❌ MongoDB Connection Error:', error);
-        // Tetap jalankan server meski MongoDB error
+        console.error('❌ MongoDB Connection Error:', error.message);
+        console.log('⚠️  Using fallback mode (in-memory storage)');
     }
 };
 
@@ -60,34 +65,76 @@ const orderSchema = new mongoose.Schema({
 const Product = mongoose.model('Product', productSchema);
 const Order = mongoose.model('Order', orderSchema);
 
+// Fallback data jika MongoDB down
+const fallbackProducts = [
+    {
+        _id: 'fallback_1',
+        name: 'AK-47',
+        category: 'senjata',
+        price: 15000,
+        stock: 10,
+        description: 'Senjata assault rifle - FALLBACK MODE'
+    },
+    {
+        _id: 'fallback_2',
+        name: 'Body Armor', 
+        category: 'armor',
+        price: 8000,
+        stock: 15,
+        description: 'Pelindung tubuh level 3 - FALLBACK MODE'
+    },
+    {
+        _id: 'fallback_3',
+        name: 'Ganja Premium',
+        category: 'ganja',
+        price: 5000,
+        stock: 20,
+        description: 'Ganja kualitas tinggi - FALLBACK MODE'
+    }
+];
+
+let fallbackOrders = [];
+
+// Check MongoDB connection
+function isMongoConnected() {
+    return mongoose.connection.readyState === 1;
+}
+
 // ===== PRODUCT ROUTES =====
 // Get all products
 app.get('/api/products', async (req, res) => {
     try {
         console.log('📦 GET /api/products called');
         
-        // Cek koneksi MongoDB
-        if (mongoose.connection.readyState !== 1) {
-            return res.status(500).json({
-                success: false,
-                error: 'Database connection failed',
-                data: getSampleProducts() // Fallback data
+        if (isMongoConnected()) {
+            const products = await Product.find().sort({ createdAt: -1 });
+            console.log(`✅ Found ${products.length} products in MongoDB`);
+            
+            return res.json({
+                success: true,
+                data: products,
+                message: 'Products retrieved from MongoDB',
+                source: 'mongodb',
+                count: products.length
+            });
+        } else {
+            console.log('⚠️  MongoDB not connected, using fallback data');
+            return res.json({
+                success: true,
+                data: fallbackProducts,
+                message: 'Products retrieved from fallback storage',
+                source: 'fallback',
+                count: fallbackProducts.length
             });
         }
-        
-        const products = await Product.find().sort({ createdAt: -1 });
-        
+    } catch (error) {
+        console.error('❌ Error in /api/products:', error.message);
         res.json({
             success: true,
-            data: products,
-            message: 'Products retrieved successfully'
-        });
-    } catch (error) {
-        console.error('❌ Error getting products:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message,
-            data: getSampleProducts() // Fallback data
+            data: fallbackProducts,
+            message: 'Products retrieved from fallback storage (error)',
+            source: 'fallback',
+            count: fallbackProducts.length
         });
     }
 });
@@ -99,65 +146,38 @@ app.post('/api/products', async (req, res) => {
         
         const productData = req.body;
         
-        // Cek koneksi MongoDB
-        if (mongoose.connection.readyState !== 1) {
-            return res.status(500).json({
-                success: false,
-                error: 'Database connection failed'
+        if (isMongoConnected()) {
+            const newProduct = new Product(productData);
+            const savedProduct = await newProduct.save();
+            
+            console.log('✅ Product saved to MongoDB:', savedProduct._id);
+            
+            return res.json({
+                success: true,
+                message: 'Product created successfully in MongoDB',
+                data: savedProduct,
+                source: 'mongodb'
+            });
+        } else {
+            // Add to fallback data
+            const newProduct = {
+                _id: 'prod_' + Date.now(),
+                ...productData,
+                createdAt: new Date().toISOString()
+            };
+            fallbackProducts.push(newProduct);
+            
+            console.log('✅ Product saved to fallback storage');
+            
+            return res.json({
+                success: true,
+                message: 'Product created successfully in fallback storage',
+                data: newProduct,
+                source: 'fallback'
             });
         }
-        
-        const newProduct = new Product(productData);
-        const savedProduct = await newProduct.save();
-        
-        res.json({
-            success: true,
-            message: 'Product created successfully',
-            data: savedProduct
-        });
     } catch (error) {
-        console.error('❌ Error creating product:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
-// Update product
-app.put('/api/products/:id', async (req, res) => {
-    try {
-        const productId = req.params.id;
-        const productData = req.body;
-        
-        // Cek koneksi MongoDB
-        if (mongoose.connection.readyState !== 1) {
-            return res.status(500).json({
-                success: false,
-                error: 'Database connection failed'
-            });
-        }
-        
-        const updatedProduct = await Product.findByIdAndUpdate(
-            productId, 
-            productData, 
-            { new: true, runValidators: true }
-        );
-        
-        if (!updatedProduct) {
-            return res.status(404).json({
-                success: false,
-                error: 'Product not found'
-            });
-        }
-        
-        res.json({
-            success: true,
-            message: 'Product updated successfully',
-            data: updatedProduct
-        });
-    } catch (error) {
-        console.error('❌ Error updating product:', error);
+        console.error('❌ Error in POST /api/products:', error.message);
         res.status(500).json({
             success: false,
             error: error.message
@@ -169,31 +189,46 @@ app.put('/api/products/:id', async (req, res) => {
 app.delete('/api/products/:id', async (req, res) => {
     try {
         const productId = req.params.id;
+        console.log('🗑️  DELETE /api/products called for ID:', productId);
         
-        // Cek koneksi MongoDB
-        if (mongoose.connection.readyState !== 1) {
-            return res.status(500).json({
-                success: false,
-                error: 'Database connection failed'
+        if (isMongoConnected()) {
+            const deletedProduct = await Product.findByIdAndDelete(productId);
+            
+            if (!deletedProduct) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Product not found in MongoDB'
+                });
+            }
+            
+            console.log('✅ Product deleted from MongoDB');
+            
+            return res.json({
+                success: true,
+                message: 'Product deleted successfully from MongoDB',
+                data: deletedProduct
+            });
+        } else {
+            // Delete from fallback data
+            const productIndex = fallbackProducts.findIndex(p => p._id === productId);
+            if (productIndex === -1) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Product not found in fallback storage'
+                });
+            }
+            
+            const deletedProduct = fallbackProducts.splice(productIndex, 1)[0];
+            console.log('✅ Product deleted from fallback storage');
+            
+            return res.json({
+                success: true,
+                message: 'Product deleted successfully from fallback storage',
+                data: deletedProduct
             });
         }
-        
-        const deletedProduct = await Product.findByIdAndDelete(productId);
-        
-        if (!deletedProduct) {
-            return res.status(404).json({
-                success: false,
-                error: 'Product not found'
-            });
-        }
-        
-        res.json({
-            success: true,
-            message: 'Product deleted successfully',
-            data: deletedProduct
-        });
     } catch (error) {
-        console.error('❌ Error deleting product:', error);
+        console.error('❌ Error in DELETE /api/products:', error.message);
         res.status(500).json({
             success: false,
             error: error.message
@@ -209,24 +244,38 @@ app.post('/api/orders', async (req, res) => {
         
         const orderData = req.body;
         
-        // Cek koneksi MongoDB
-        if (mongoose.connection.readyState !== 1) {
-            return res.status(500).json({
-                success: false,
-                error: 'Database connection failed'
+        if (isMongoConnected()) {
+            const newOrder = new Order(orderData);
+            const savedOrder = await newOrder.save();
+            
+            console.log('✅ Order saved to MongoDB');
+            
+            return res.json({
+                success: true,
+                message: 'Order created successfully in MongoDB',
+                data: savedOrder,
+                source: 'mongodb'
+            });
+        } else {
+            // Add to fallback orders
+            const newOrder = {
+                _id: 'order_' + Date.now(),
+                ...orderData,
+                createdAt: new Date().toISOString()
+            };
+            fallbackOrders.push(newOrder);
+            
+            console.log('✅ Order saved to fallback storage');
+            
+            return res.json({
+                success: true,
+                message: 'Order created successfully in fallback storage',
+                data: newOrder,
+                source: 'fallback'
             });
         }
-        
-        const newOrder = new Order(orderData);
-        const savedOrder = await newOrder.save();
-        
-        res.json({
-            success: true,
-            message: 'Order created successfully',
-            data: savedOrder
-        });
     } catch (error) {
-        console.error('❌ Error creating order:', error);
+        console.error('❌ Error in POST /api/orders:', error.message);
         res.status(500).json({
             success: false,
             error: error.message
@@ -234,33 +283,35 @@ app.post('/api/orders', async (req, res) => {
     }
 });
 
-// Get all orders (admin)
+// Get all orders
 app.get('/api/orders', async (req, res) => {
     try {
         console.log('📋 GET /api/orders called');
         
-        // Cek koneksi MongoDB
-        if (mongoose.connection.readyState !== 1) {
-            return res.status(500).json({
-                success: false,
-                error: 'Database connection failed',
-                data: []
+        if (isMongoConnected()) {
+            const orders = await Order.find().sort({ createdAt: -1 });
+            
+            return res.json({
+                success: true,
+                data: orders,
+                message: 'Orders retrieved from MongoDB',
+                count: orders.length
+            });
+        } else {
+            return res.json({
+                success: true,
+                data: fallbackOrders,
+                message: 'Orders retrieved from fallback storage',
+                count: fallbackOrders.length
             });
         }
-        
-        const orders = await Order.find().sort({ createdAt: -1 });
-        
+    } catch (error) {
+        console.error('❌ Error in GET /api/orders:', error.message);
         res.json({
             success: true,
-            data: orders,
-            message: 'Orders retrieved successfully'
-        });
-    } catch (error) {
-        console.error('❌ Error getting orders:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message,
-            data: []
+            data: fallbackOrders,
+            message: 'Orders retrieved from fallback storage (error)',
+            count: fallbackOrders.length
         });
     }
 });
@@ -271,34 +322,46 @@ app.put('/api/orders/:id', async (req, res) => {
         const orderId = req.params.id;
         const { status } = req.body;
         
-        // Cek koneksi MongoDB
-        if (mongoose.connection.readyState !== 1) {
-            return res.status(500).json({
-                success: false,
-                error: 'Database connection failed'
+        console.log('✏️  PUT /api/orders called for ID:', orderId, 'Status:', status);
+        
+        if (isMongoConnected()) {
+            const updatedOrder = await Order.findByIdAndUpdate(
+                orderId,
+                { status },
+                { new: true }
+            );
+            
+            if (!updatedOrder) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Order not found in MongoDB'
+                });
+            }
+            
+            return res.json({
+                success: true,
+                message: 'Order status updated successfully in MongoDB',
+                data: updatedOrder
+            });
+        } else {
+            // Update in fallback orders
+            const order = fallbackOrders.find(o => o._id === orderId);
+            if (!order) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Order not found in fallback storage'
+                });
+            }
+            
+            order.status = status;
+            return res.json({
+                success: true,
+                message: 'Order status updated successfully in fallback storage',
+                data: order
             });
         }
-        
-        const updatedOrder = await Order.findByIdAndUpdate(
-            orderId,
-            { status },
-            { new: true }
-        );
-        
-        if (!updatedOrder) {
-            return res.status(404).json({
-                success: false,
-                error: 'Order not found'
-            });
-        }
-        
-        res.json({
-            success: true,
-            message: 'Order status updated successfully',
-            data: updatedOrder
-        });
     } catch (error) {
-        console.error('❌ Error updating order:', error);
+        console.error('❌ Error in PUT /api/orders:', error.message);
         res.status(500).json({
             success: false,
             error: error.message
@@ -308,19 +371,27 @@ app.put('/api/orders/:id', async (req, res) => {
 
 // ===== ADMIN ROUTES =====
 app.post('/api/admin/login', (req, res) => {
-    console.log('🔐 POST /api/admin/login called:', req.body);
-    
-    const { username, password } = req.body;
-    
-    if (username === 'admin' && password === 'lvime2025') {
-        res.json({
-            success: true,
-            message: 'Login successful'
-        });
-    } else {
-        res.status(401).json({
+    try {
+        console.log('🔐 POST /api/admin/login called');
+        
+        const { username, password } = req.body;
+        
+        if (username === 'admin' && password === 'lvime2025') {
+            res.json({
+                success: true,
+                message: 'Login successful'
+            });
+        } else {
+            res.status(401).json({
+                success: false,
+                error: 'Invalid credentials'
+            });
+        }
+    } catch (error) {
+        console.error('❌ Error in POST /api/admin/login:', error.message);
+        res.status(500).json({
             success: false,
-            error: 'Invalid credentials'
+            error: error.message
         });
     }
 });
@@ -334,7 +405,8 @@ app.get('/', (req, res) => {
         environment: process.env.NODE_ENV || 'production',
         version: '2.0.0',
         database: {
-            status: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+            status: isMongoConnected() ? 'connected' : 'disconnected',
+            name: 'las_valkyrie'
         }
     });
 });
@@ -365,41 +437,12 @@ app.use((error, req, res, next) => {
     });
 });
 
-// Fallback sample data
-function getSampleProducts() {
-    return [
-        {
-            _id: '1',
-            name: 'AK-47',
-            category: 'senjata',
-            price: 15000,
-            stock: 10,
-            description: 'Senjata assault rifle - SAMPLE DATA'
-        },
-        {
-            _id: '2',
-            name: 'Body Armor', 
-            category: 'armor',
-            price: 8000,
-            stock: 15,
-            description: 'Pelindung tubuh level 3 - SAMPLE DATA'
-        },
-        {
-            _id: '3',
-            name: 'Ganja Premium',
-            category: 'ganja',
-            price: 5000,
-            stock: 20,
-            description: 'Ganja kualitas tinggi - SAMPLE DATA'
-        }
-    ];
-}
-
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`📍 Health check: http://localhost:${PORT}/`);
-    console.log(`📍 MongoDB Status: ${mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'}`);
+    console.log(`📍 MongoDB Status: ${isMongoConnected() ? 'Connected' : 'Disconnected'}`);
+    console.log(`📍 Database: las_valkyrie`);
 });
 
 module.exports = app;
