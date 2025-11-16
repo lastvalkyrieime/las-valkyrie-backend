@@ -6,7 +6,7 @@ const app = express();
 
 // CORS configuration yang lebih luas
 app.use(cors({
-    origin: '*', // Untuk testing, boleh pakai *
+    origin: '*',
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
@@ -16,7 +16,7 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Simple in-memory database untuk testing
+// Simple in-memory database
 let products = [
     {
         _id: '1',
@@ -46,7 +46,7 @@ let products = [
 
 let orders = [];
 
-// Routes
+// ===== PRODUCT ROUTES =====
 // Get all products
 app.get('/api/products', (req, res) => {
     console.log('📦 GET /api/products called');
@@ -57,6 +57,68 @@ app.get('/api/products', (req, res) => {
     });
 });
 
+// Add new product
+app.post('/api/products', (req, res) => {
+    console.log('➕ POST /api/products called:', req.body);
+    
+    const productData = req.body;
+    const newProduct = {
+        _id: 'prod_' + Date.now(),
+        ...productData,
+        createdAt: new Date().toISOString()
+    };
+    
+    products.push(newProduct);
+    
+    res.json({
+        success: true,
+        message: 'Product created successfully',
+        data: newProduct
+    });
+});
+
+// Update product
+app.put('/api/products/:id', (req, res) => {
+    const productId = req.params.id;
+    const productData = req.body;
+    
+    const productIndex = products.findIndex(p => p._id === productId);
+    if (productIndex !== -1) {
+        products[productIndex] = { ...products[productIndex], ...productData };
+        res.json({
+            success: true,
+            message: 'Product updated successfully',
+            data: products[productIndex]
+        });
+    } else {
+        res.status(404).json({
+            success: false,
+            error: 'Product not found'
+        });
+    }
+});
+
+// Delete product
+app.delete('/api/products/:id', (req, res) => {
+    const productId = req.params.id;
+    
+    const productIndex = products.findIndex(p => p._id === productId);
+    if (productIndex !== -1) {
+        const deletedProduct = products.splice(productIndex, 1)[0];
+        res.json({
+            success: true,
+            message: 'Product deleted successfully',
+            data: deletedProduct
+        });
+    } else {
+        res.status(404).json({
+            success: false,
+            error: 'Product not found'
+        });
+    }
+});
+
+// ===== ORDER ROUTES =====
 // Create new order
 app.post('/api/orders', (req, res) => {
     console.log('🛒 POST /api/orders called:', req.body);
@@ -75,25 +137,6 @@ app.post('/api/orders', (req, res) => {
         message: 'Order created successfully',
         data: newOrder
     });
-});
-
-// Admin login
-app.post('/api/admin/login', (req, res) => {
-    console.log('🔐 POST /api/admin/login called:', req.body);
-    
-    const { username, password } = req.body;
-    
-    if (username === 'admin' && password === 'lvime2025') {
-        res.json({
-            success: true,
-            message: 'Login successful'
-        });
-    } else {
-        res.status(401).json({
-            success: false,
-            error: 'Invalid credentials'
-        });
-    }
 });
 
 // Get all orders (admin)
@@ -126,7 +169,27 @@ app.put('/api/orders/:id', (req, res) => {
     }
 });
 
-// Health check endpoint - FIXED
+// ===== ADMIN ROUTES =====
+// Admin login
+app.post('/api/admin/login', (req, res) => {
+    console.log('🔐 POST /api/admin/login called:', req.body);
+    
+    const { username, password } = req.body;
+    
+    if (username === 'admin' && password === 'lvime2025') {
+        res.json({
+            success: true,
+            message: 'Login successful'
+        });
+    } else {
+        res.status(401).json({
+            success: false,
+            error: 'Invalid credentials'
+        });
+    }
+});
+
+// Health check endpoint
 app.get('/', (req, res) => {
     console.log('🏠 GET / called - Health check');
     res.json({
@@ -134,7 +197,11 @@ app.get('/', (req, res) => {
         message: 'Las Valkyrie API is running!',
         timestamp: new Date().toISOString(),
         environment: process.env.NODE_ENV || 'production',
-        version: '2.0.0'
+        version: '2.0.0',
+        stats: {
+            products: products.length,
+            orders: orders.length
+        }
     });
 });
 
