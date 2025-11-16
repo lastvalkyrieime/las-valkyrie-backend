@@ -1,7 +1,6 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -13,9 +12,15 @@ app.use(express.json());
 // MongoDB Connection
 const MONGODB_URI = process.env.MONGODB_URI;
 
-mongoose.connect(MONGODB_URI)
-  .then(() => console.log('✅ Connected to MongoDB'))
-  .catch(err => console.error('❌ MongoDB error:', err));
+console.log('🔧 Starting server...');
+console.log('📦 MongoDB URI:', MONGODB_URI ? 'Set' : 'Not set');
+
+mongoose.connect(MONGODB_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+})
+.then(() => console.log('✅ Connected to MongoDB'))
+.catch(err => console.error('❌ MongoDB connection error:', err));
 
 // Product Schema
 const productSchema = new mongoose.Schema({
@@ -33,6 +38,16 @@ app.get('/', (req, res) => {
   res.json({ 
     success: true, 
     message: 'Las Valkyrie API is running!',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
+
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'OK',
+    database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
     timestamp: new Date().toISOString()
   });
 });
@@ -82,6 +97,78 @@ app.delete('/api/products/:id', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+// Create order
+app.post('/api/orders', async (req, res) => {
+  try {
+    const { customerName, discordId, additionalInfo, items } = req.body;
+    
+    // Calculate total price
+    const totalPrice = items.reduce((total, item) => total + (item.price * item.quantity), 0);
+    
+    const newOrder = new Order({
+      customerName,
+      discordId,
+      additionalInfo,
+      items,
+      totalPrice
+    });
+    
+    const savedOrder = await newOrder.save();
+    
+    // Update product stock
+    for (const item of items) {
+      await Product.findByIdAndUpdate(
+        item.product,
+        { $inc: { stock: -item.quantity } }
+      );
+    }
+    
+    res.json({ success: true, data: savedOrder });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Order Schema (tambahkan ini)
+const orderSchema = new mongoose.Schema({
+  customerName: { type: String, required: true },
+  discordId: { type: String },
+  additionalInfo: { type: String },
+  items: [{
+    product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+    name: String,
+    price: Number,
+    quantity: Number
+  }],
+  totalPrice: { type: Number, required: true },
+  status: { type: String, default: 'pending' }
+}, { timestamps: true });
+
+const Order = mongoose.model('Order', orderSchema);
+
+// Get all orders
+app.get('/api/orders', async (req, res) => {
+  try {
+    const orders = await Order.find().sort({ createdAt: -1 });
+    res.json({ success: true, data: orders });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('🚨 Error:', err);
+  res.status(500).json({ success: false, error: 'Internal Server Error' });
+});
+
+// 404 handler
+app.use('*', (req, res) => {
+  res.status(404).json({ success: false, error: 'Route not found' });
+});
+
+// Start server
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
