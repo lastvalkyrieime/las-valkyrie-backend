@@ -6,7 +6,7 @@ const app = express();
 
 // CORS configuration
 app.use(cors({
-    origin: ['https://your-app-name.netlify.app', 'http://localhost:3000'],
+    origin: ['lv-resource-order.netlify.app', 'http://localhost:3000'],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
