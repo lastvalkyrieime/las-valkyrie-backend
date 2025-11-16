@@ -1,13 +1,11 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const axios = require('axios');
 
 const app = express();
 
-
-require('dotenv').config(); // Tambahkan ini
-const express = require('express');
-const mongoose = require('mongoose');
+require('dotenv').config();
 
 // CORS configuration
 app.use(cors({
@@ -21,7 +19,7 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// MongoDB Connection dengan connection string yang valid
+// MongoDB Connection
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://lastvalkyrieime_db_user:lvime2025@lvresourcedatabase.9wth93k.mongodb.net/las_valkyrie?retryWrites=true&w=majority';
 
 console.log('🔧 Initializing MongoDB connection...');
@@ -47,7 +45,11 @@ connectDB();
 // MongoDB Schemas
 const productSchema = new mongoose.Schema({
     name: { type: String, required: true },
-    category: { type: String, required: true },
+    category: { 
+        type: String, 
+        required: true,
+        enum: ['senjata', 'amunisi', 'armor', 'attachment', 'ganja', 'meth', 'alat rampok']
+    },
     price: { type: Number, required: true },
     stock: { type: Number, required: true },
     description: { type: String, default: '' }
@@ -55,22 +57,45 @@ const productSchema = new mongoose.Schema({
 
 const orderSchema = new mongoose.Schema({
     customerName: { type: String, required: true },
-    discordId: { type: String, default: '' },
+    discordId: { type: String, required: true },
     additionalInfo: { type: String, default: '' },
     items: [{
         productId: String,
         name: String,
         price: Number,
-        quantity: Number
+        quantity: Number,
+        category: String
     }],
     totalPrice: { type: Number, required: true },
     status: { type: String, default: 'pending' }
 }, { timestamps: true });
 
+const adminSchema = new mongoose.Schema({
+    username: { type: String, required: true, unique: true },
+    password: { type: String, required: true }
+}, { timestamps: true });
+
 const Product = mongoose.model('Product', productSchema);
 const Order = mongoose.model('Order', orderSchema);
+const Admin = mongoose.model('Admin', adminSchema);
 
-// Fallback data jika MongoDB down
+// Initialize admin user
+const initializeAdmin = async () => {
+    try {
+        const adminExists = await Admin.findOne({ username: 'admin' });
+        if (!adminExists) {
+            await Admin.create({
+                username: 'admin',
+                password: 'lvime2025'
+            });
+            console.log('✅ Admin user initialized');
+        }
+    } catch (error) {
+        console.log('ℹ️ Admin user already exists');
+    }
+};
+
+// Fallback data
 const fallbackProducts = [
     {
         _id: 'fallback_1',
@@ -105,16 +130,66 @@ function isMongoConnected() {
     return mongoose.connection.readyState === 1;
 }
 
+// Discord webhook function
+const sendDiscordNotification = async (order) => {
+    try {
+        const discordWebhookURL = 'https://discord.com/api/webhooks/1439553975824154816/SLTHFdcpou_q-DhgO90k0l1f2OACzguDfQtYQENgfcvN0wbPSaS17h657JIuHCJbHqy3';
+        
+        const itemsList = order.items.map(item => 
+            `• ${item.name} (${item.category}) - ${item.quantity} x $${item.price} = $${item.quantity * item.price}`
+        ).join('\n');
+
+        const embed = {
+            title: '🛒 New Order Received!',
+            color: 0x00ff00,
+            fields: [
+                {
+                    name: 'Customer Info',
+                    value: `**Name:** ${order.customerName}\n**Discord ID:** ${order.discordId}`,
+                    inline: false
+                },
+                {
+                    name: 'Order Details',
+                    value: itemsList,
+                    inline: false
+                },
+                {
+                    name: 'Total Price',
+                    value: `$${order.totalPrice}`,
+                    inline: true
+                },
+                {
+                    name: 'Status',
+                    value: order.status,
+                    inline: true
+                },
+                {
+                    name: 'Additional Info',
+                    value: order.additionalInfo || 'No additional information',
+                    inline: false
+                }
+            ],
+            timestamp: new Date().toISOString(),
+            footer: {
+                text: 'Las Valkyrie Order System'
+            }
+        };
+
+        await axios.post(discordWebhookURL, {
+            embeds: [embed]
+        });
+
+        console.log('✅ Discord notification sent');
+    } catch (error) {
+        console.error('❌ Failed to send Discord notification:', error.message);
+    }
+};
+
 // ===== PRODUCT ROUTES =====
-// Get all products
 app.get('/api/products', async (req, res) => {
     try {
-        console.log('📦 GET /api/products called');
-        
         if (isMongoConnected()) {
             const products = await Product.find().sort({ createdAt: -1 });
-            console.log(`✅ Found ${products.length} products in MongoDB`);
-            
             return res.json({
                 success: true,
                 data: products,
@@ -123,7 +198,6 @@ app.get('/api/products', async (req, res) => {
                 count: products.length
             });
         } else {
-            console.log('⚠️  MongoDB not connected, using fallback data');
             return res.json({
                 success: true,
                 data: fallbackProducts,
@@ -144,18 +218,13 @@ app.get('/api/products', async (req, res) => {
     }
 });
 
-// Add new product
 app.post('/api/products', async (req, res) => {
     try {
-        console.log('➕ POST /api/products called:', req.body);
-        
         const productData = req.body;
         
         if (isMongoConnected()) {
             const newProduct = new Product(productData);
             const savedProduct = await newProduct.save();
-            
-            console.log('✅ Product saved to MongoDB:', savedProduct._id);
             
             return res.json({
                 success: true,
@@ -164,15 +233,12 @@ app.post('/api/products', async (req, res) => {
                 source: 'mongodb'
             });
         } else {
-            // Add to fallback data
             const newProduct = {
                 _id: 'prod_' + Date.now(),
                 ...productData,
                 createdAt: new Date().toISOString()
             };
             fallbackProducts.push(newProduct);
-            
-            console.log('✅ Product saved to fallback storage');
             
             return res.json({
                 success: true,
@@ -190,11 +256,62 @@ app.post('/api/products', async (req, res) => {
     }
 });
 
-// Delete product
+app.put('/api/products/:id', async (req, res) => {
+    try {
+        const productId = req.params.id;
+        const updateData = req.body;
+        
+        if (isMongoConnected()) {
+            const updatedProduct = await Product.findByIdAndUpdate(
+                productId,
+                updateData,
+                { new: true }
+            );
+            
+            if (!updatedProduct) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Product not found in MongoDB'
+                });
+            }
+            
+            return res.json({
+                success: true,
+                message: 'Product updated successfully in MongoDB',
+                data: updatedProduct
+            });
+        } else {
+            const productIndex = fallbackProducts.findIndex(p => p._id === productId);
+            if (productIndex === -1) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Product not found in fallback storage'
+                });
+            }
+            
+            fallbackProducts[productIndex] = {
+                ...fallbackProducts[productIndex],
+                ...updateData
+            };
+            
+            return res.json({
+                success: true,
+                message: 'Product updated successfully in fallback storage',
+                data: fallbackProducts[productIndex]
+            });
+        }
+    } catch (error) {
+        console.error('❌ Error in PUT /api/products:', error.message);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 app.delete('/api/products/:id', async (req, res) => {
     try {
         const productId = req.params.id;
-        console.log('🗑️  DELETE /api/products called for ID:', productId);
         
         if (isMongoConnected()) {
             const deletedProduct = await Product.findByIdAndDelete(productId);
@@ -206,15 +323,12 @@ app.delete('/api/products/:id', async (req, res) => {
                 });
             }
             
-            console.log('✅ Product deleted from MongoDB');
-            
             return res.json({
                 success: true,
                 message: 'Product deleted successfully from MongoDB',
                 data: deletedProduct
             });
         } else {
-            // Delete from fallback data
             const productIndex = fallbackProducts.findIndex(p => p._id === productId);
             if (productIndex === -1) {
                 return res.status(404).json({
@@ -224,7 +338,6 @@ app.delete('/api/products/:id', async (req, res) => {
             }
             
             const deletedProduct = fallbackProducts.splice(productIndex, 1)[0];
-            console.log('✅ Product deleted from fallback storage');
             
             return res.json({
                 success: true,
@@ -242,18 +355,16 @@ app.delete('/api/products/:id', async (req, res) => {
 });
 
 // ===== ORDER ROUTES =====
-// Create new order
 app.post('/api/orders', async (req, res) => {
     try {
-        console.log('🛒 POST /api/orders called:', req.body);
-        
         const orderData = req.body;
         
         if (isMongoConnected()) {
             const newOrder = new Order(orderData);
             const savedOrder = await newOrder.save();
             
-            console.log('✅ Order saved to MongoDB');
+            // Send Discord notification
+            await sendDiscordNotification(savedOrder);
             
             return res.json({
                 success: true,
@@ -262,7 +373,6 @@ app.post('/api/orders', async (req, res) => {
                 source: 'mongodb'
             });
         } else {
-            // Add to fallback orders
             const newOrder = {
                 _id: 'order_' + Date.now(),
                 ...orderData,
@@ -270,7 +380,8 @@ app.post('/api/orders', async (req, res) => {
             };
             fallbackOrders.push(newOrder);
             
-            console.log('✅ Order saved to fallback storage');
+            // Send Discord notification
+            await sendDiscordNotification(newOrder);
             
             return res.json({
                 success: true,
@@ -288,11 +399,8 @@ app.post('/api/orders', async (req, res) => {
     }
 });
 
-// Get all orders
 app.get('/api/orders', async (req, res) => {
     try {
-        console.log('📋 GET /api/orders called');
-        
         if (isMongoConnected()) {
             const orders = await Order.find().sort({ createdAt: -1 });
             
@@ -321,13 +429,10 @@ app.get('/api/orders', async (req, res) => {
     }
 });
 
-// Update order status
 app.put('/api/orders/:id', async (req, res) => {
     try {
         const orderId = req.params.id;
         const { status } = req.body;
-        
-        console.log('✏️  PUT /api/orders called for ID:', orderId, 'Status:', status);
         
         if (isMongoConnected()) {
             const updatedOrder = await Order.findByIdAndUpdate(
@@ -349,7 +454,6 @@ app.put('/api/orders/:id', async (req, res) => {
                 data: updatedOrder
             });
         } else {
-            // Update in fallback orders
             const order = fallbackOrders.find(o => o._id === orderId);
             if (!order) {
                 return res.status(404).json({
@@ -375,22 +479,36 @@ app.put('/api/orders/:id', async (req, res) => {
 });
 
 // ===== ADMIN ROUTES =====
-app.post('/api/admin/login', (req, res) => {
+app.post('/api/admin/login', async (req, res) => {
     try {
-        console.log('🔐 POST /api/admin/login called');
-        
         const { username, password } = req.body;
         
-        if (username === 'admin' && password === 'lvime2025') {
-            res.json({
-                success: true,
-                message: 'Login successful'
-            });
+        if (isMongoConnected()) {
+            const admin = await Admin.findOne({ username, password });
+            if (admin) {
+                res.json({
+                    success: true,
+                    message: 'Login successful'
+                });
+            } else {
+                res.status(401).json({
+                    success: false,
+                    error: 'Invalid credentials'
+                });
+            }
         } else {
-            res.status(401).json({
-                success: false,
-                error: 'Invalid credentials'
-            });
+            // Fallback admin credentials
+            if (username === 'admin' && password === 'lvime2025') {
+                res.json({
+                    success: true,
+                    message: 'Login successful (fallback mode)'
+                });
+            } else {
+                res.status(401).json({
+                    success: false,
+                    error: 'Invalid credentials'
+                });
+            }
         }
     } catch (error) {
         console.error('❌ Error in POST /api/admin/login:', error.message);
@@ -416,38 +534,14 @@ app.get('/', (req, res) => {
     });
 });
 
-// Handle preflight requests
-app.options('*', (req, res) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
-    res.status(200).send();
-});
-
-// Handle 404
-app.use('*', (req, res) => {
-    console.log('❌ 404 Route not found:', req.originalUrl);
-    res.status(404).json({
-        success: false,
-        error: 'Route not found: ' + req.originalUrl
-    });
-});
-
-// Error handling middleware
-app.use((error, req, res, next) => {
-    console.error('🚨 Server Error:', error);
-    res.status(500).json({
-        success: false,
-        error: 'Internal server error: ' + error.message
-    });
-});
+// Initialize admin on startup
+initializeAdmin();
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`📍 Health check: http://localhost:${PORT}/`);
     console.log(`📍 MongoDB Status: ${isMongoConnected() ? 'Connected' : 'Disconnected'}`);
-    console.log(`📍 Database: las_valkyrie`);
 });
 
 module.exports = app;
