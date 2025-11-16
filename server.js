@@ -17,22 +17,32 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Health check route (PENTING untuk Vercel)
+// ===== ROOT ROUTE =====
 app.get('/', (req, res) => {
     res.json({ 
         message: 'Las Valkyrie Backend is running!',
         timestamp: new Date().toISOString(),
-        mongodb_status: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+        mongodb_status: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+        database: 'las_valkyrie',
+        available_endpoints: [
+            'GET  /',
+            'GET  /api/check-database',
+            'GET  /api/check-admin', 
+            'GET  /api/products',
+            'POST /api/products',
+            'GET  /api/orders',
+            'POST /api/orders'
+        ]
     });
 });
 
-// MongoDB Connection - VERCEL OPTIMIZED
-const MONGODB_URI = process.env.MONGODB_URI;
+// MongoDB Connection
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://lastvalkyrieime_db_user:lvime2025@lvresourcedatabase.9wth93k.mongodb.net/las_valkyrie?retryWrites=true&w=majority';
 
-console.log('🔧 Initializing MongoDB connection...');
+console.log('🔧 Initializing MongoDB connection to las_valkyrie...');
 console.log('MongoDB URI available:', !!MONGODB_URI);
 
-// MongoDB Schemas (DEFINE SEBELUM CONNECTION)
+// MongoDB Schemas
 const productSchema = new mongoose.Schema({
     name: { type: String, required: true },
     category: { 
@@ -71,7 +81,7 @@ const adminSchema = new mongoose.Schema({
     password: { type: String, required: true }
 }, { 
     timestamps: true,
-    collection: 'admins'
+    collection: 'admin'
 });
 
 const Product = mongoose.model('Product', productSchema);
@@ -92,7 +102,7 @@ const fallbackProducts = [
 
 let fallbackOrders = [];
 
-// Improved MongoDB connection with timeout
+// MongoDB connection
 const connectDB = async () => {
     try {
         if (!MONGODB_URI) {
@@ -100,15 +110,20 @@ const connectDB = async () => {
             return;
         }
 
-        // Connection options for better performance
+        console.log('🔗 Connecting to MongoDB database: las_valkyrie...');
+        
         const options = {
             maxPoolSize: 10,
-            serverSelectionTimeoutMS: 5000,
+            serverSelectionTimeoutMS: 10000,
             socketTimeoutMS: 45000,
         };
 
         await mongoose.connect(MONGODB_URI, options);
-        console.log('✅ MongoDB Connected Successfully');
+        console.log('✅ MongoDB Connected Successfully to las_valkyrie');
+        
+        const db = mongoose.connection.db;
+        const collections = await db.listCollections().toArray();
+        console.log('📊 Available collections in las_valkyrie:', collections.map(c => c.name));
         
     } catch (error) {
         console.error('❌ MongoDB Connection Error:', error.message);
@@ -123,6 +138,57 @@ connectDB();
 function isMongoConnected() {
     return mongoose.connection.readyState === 1;
 }
+
+// ===== API ROUTES =====
+
+// Database Check Endpoint
+app.get('/api/check-database', async (req, res) => {
+    try {
+        const db = mongoose.connection.db;
+        const databaseName = db.databaseName;
+        const collections = await db.listCollections().toArray();
+        const collectionNames = collections.map(c => c.name);
+        
+        res.json({
+            connected_to_database: databaseName,
+            available_collections: collectionNames,
+            expected_collections: ['products', 'orders', 'admin'],
+            missing_collections: ['products', 'orders', 'admin'].filter(col => !collectionNames.includes(col)),
+            mongodb_status: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+            status: 'success'
+        });
+    } catch (error) {
+        res.status(500).json({
+            error: error.message,
+            status: 'error'
+        });
+    }
+});
+
+// Check if admin user exists
+app.get('/api/check-admin', async (req, res) => {
+    try {
+        if (isMongoConnected()) {
+            const adminCount = await Admin.countDocuments();
+            res.json({
+                has_admin: adminCount > 0,
+                admin_count: adminCount,
+                status: 'success'
+            });
+        } else {
+            res.json({
+                has_admin: false,
+                admin_count: 0,
+                status: 'fallback_mode'
+            });
+        }
+    } catch (error) {
+        res.status(500).json({
+            error: error.message,
+            status: 'error'
+        });
+    }
+});
 
 // Discord webhook function
 const sendDiscordNotification = async (order) => {
@@ -189,9 +255,11 @@ app.post('/api/products', async (req, res) => {
             const newProduct = new Product(productData);
             const savedProduct = await newProduct.save();
             
+            console.log('✅ Product saved to las_valkyrie.products:', savedProduct._id);
+            
             return res.json({
                 success: true,
-                message: 'Product created successfully',
+                message: 'Product created successfully in las_valkyrie',
                 data: savedProduct
             });
         } else {
@@ -202,6 +270,8 @@ app.post('/api/products', async (req, res) => {
                 updatedAt: new Date().toISOString()
             };
             fallbackProducts.push(newProduct);
+            
+            console.log('✅ Product saved to fallback storage');
             
             return res.json({
                 success: true,
@@ -225,7 +295,7 @@ app.get('/api/products', async (req, res) => {
             return res.json({
                 success: true,
                 data: products,
-                message: 'Products retrieved from MongoDB'
+                message: 'Products retrieved from las_valkyrie'
             });
         } else {
             return res.json({
@@ -264,9 +334,11 @@ app.post('/api/orders', async (req, res) => {
             
             await sendDiscordNotification(savedOrder);
             
+            console.log('✅ Order saved to las_valkyrie.orders:', savedOrder._id);
+            
             return res.json({
                 success: true,
-                message: 'Order created successfully',
+                message: 'Order created successfully in las_valkyrie',
                 data: savedOrder
             });
         } else {
@@ -279,6 +351,8 @@ app.post('/api/orders', async (req, res) => {
             fallbackOrders.push(newOrder);
             
             await sendDiscordNotification(newOrder);
+            
+            console.log('✅ Order saved to fallback storage');
             
             return res.json({
                 success: true,
@@ -302,7 +376,7 @@ app.get('/api/orders', async (req, res) => {
             return res.json({
                 success: true,
                 data: orders,
-                message: 'Orders retrieved from MongoDB'
+                message: 'Orders retrieved from las_valkyrie'
             });
         } else {
             return res.json({
@@ -321,6 +395,24 @@ app.get('/api/orders', async (req, res) => {
     }
 });
 
+// ===== CATCH ALL ROUTE =====
+app.get('*', (req, res) => {
+    res.status(404).json({
+        success: false,
+        error: 'Route not found',
+        requested_url: req.originalUrl,
+        available_routes: [
+            'GET  /',
+            'GET  /api/check-database',
+            'GET  /api/check-admin',
+            'GET  /api/products',
+            'POST /api/products',
+            'GET  /api/orders',
+            'POST /api/orders'
+        ]
+    });
+});
+
 // Error handling middleware
 app.use((error, req, res, next) => {
     console.error('🚨 Unhandled Error:', error);
@@ -330,13 +422,13 @@ app.use((error, req, res, next) => {
     });
 });
 
-// 404 handler
-app.use('*', (req, res) => {
-    res.status(404).json({
-        success: false,
-        error: 'Route not found'
-    });
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`📍 Health check: http://localhost:${PORT}/`);
+    console.log(`📍 Database: las_valkyrie`);
+    console.log(`📍 Collections: products, orders, admin`);
+    console.log(`📍 MongoDB Status: ${isMongoConnected() ? 'Connected' : 'Disconnected'}`);
 });
 
-// Export untuk Vercel (PENTING)
 module.exports = app;
