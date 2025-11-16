@@ -23,7 +23,6 @@ app.use(express.urlencoded({ extended: true }));
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://lastvalkyrieime_db_user:lvime2025@lvresourcedatabase.9wth93k.mongodb.net/las_valkyrie?retryWrites=true&w=majority';
 
 console.log('🔧 Initializing MongoDB connection...');
-console.log('📝 Database: las_valkyrie');
 
 const connectDB = async () => {
     try {
@@ -33,10 +32,9 @@ const connectDB = async () => {
             serverSelectionTimeoutMS: 10000,
             socketTimeoutMS: 45000,
         });
-        console.log('✅ MongoDB Connected Successfully to las_valkyrie database');
+        console.log('✅ MongoDB Connected Successfully');
     } catch (error) {
         console.error('❌ MongoDB Connection Error:', error.message);
-        console.log('⚠️  Using fallback mode (in-memory storage)');
     }
 };
 
@@ -70,30 +68,8 @@ const orderSchema = new mongoose.Schema({
     status: { type: String, default: 'pending' }
 }, { timestamps: true });
 
-const adminSchema = new mongoose.Schema({
-    username: { type: String, required: true, unique: true },
-    password: { type: String, required: true }
-}, { timestamps: true });
-
 const Product = mongoose.model('Product', productSchema);
 const Order = mongoose.model('Order', orderSchema);
-const Admin = mongoose.model('Admin', adminSchema);
-
-// Initialize admin user
-const initializeAdmin = async () => {
-    try {
-        const adminExists = await Admin.findOne({ username: 'admin' });
-        if (!adminExists) {
-            await Admin.create({
-                username: 'admin',
-                password: 'lvime2025'
-            });
-            console.log('✅ Admin user initialized');
-        }
-    } catch (error) {
-        console.log('ℹ️ Admin user already exists');
-    }
-};
 
 // Fallback data
 const fallbackProducts = [
@@ -104,22 +80,6 @@ const fallbackProducts = [
         price: 15000,
         stock: 10,
         description: 'Senjata assault rifle - FALLBACK MODE'
-    },
-    {
-        _id: 'fallback_2',
-        name: 'Body Armor', 
-        category: 'armor',
-        price: 8000,
-        stock: 15,
-        description: 'Pelindung tubuh level 3 - FALLBACK MODE'
-    },
-    {
-        _id: 'fallback_3',
-        name: 'Ganja Premium',
-        category: 'ganja',
-        price: 5000,
-        stock: 20,
-        description: 'Ganja kualitas tinggi - FALLBACK MODE'
     }
 ];
 
@@ -162,17 +122,9 @@ const sendDiscordNotification = async (order) => {
                     name: 'Status',
                     value: order.status,
                     inline: true
-                },
-                {
-                    name: 'Additional Info',
-                    value: order.additionalInfo || 'No additional information',
-                    inline: false
                 }
             ],
-            timestamp: new Date().toISOString(),
-            footer: {
-                text: 'Las Valkyrie Order System'
-            }
+            timestamp: new Date().toISOString()
         };
 
         await axios.post(discordWebhookURL, {
@@ -193,17 +145,13 @@ app.get('/api/products', async (req, res) => {
             return res.json({
                 success: true,
                 data: products,
-                message: 'Products retrieved from MongoDB',
-                source: 'mongodb',
-                count: products.length
+                message: 'Products retrieved from MongoDB'
             });
         } else {
             return res.json({
                 success: true,
                 data: fallbackProducts,
-                message: 'Products retrieved from fallback storage',
-                source: 'fallback',
-                count: fallbackProducts.length
+                message: 'Products retrieved from fallback storage'
             });
         }
     } catch (error) {
@@ -211,9 +159,7 @@ app.get('/api/products', async (req, res) => {
         res.json({
             success: true,
             data: fallbackProducts,
-            message: 'Products retrieved from fallback storage (error)',
-            source: 'fallback',
-            count: fallbackProducts.length
+            message: 'Products retrieved from fallback storage (error)'
         });
     }
 });
@@ -228,9 +174,8 @@ app.post('/api/products', async (req, res) => {
             
             return res.json({
                 success: true,
-                message: 'Product created successfully in MongoDB',
-                data: savedProduct,
-                source: 'mongodb'
+                message: 'Product created successfully',
+                data: savedProduct
             });
         } else {
             const newProduct = {
@@ -242,9 +187,8 @@ app.post('/api/products', async (req, res) => {
             
             return res.json({
                 success: true,
-                message: 'Product created successfully in fallback storage',
-                data: newProduct,
-                source: 'fallback'
+                message: 'Product created successfully in fallback',
+                data: newProduct
             });
         }
     } catch (error) {
@@ -271,13 +215,13 @@ app.put('/api/products/:id', async (req, res) => {
             if (!updatedProduct) {
                 return res.status(404).json({
                     success: false,
-                    error: 'Product not found in MongoDB'
+                    error: 'Product not found'
                 });
             }
             
             return res.json({
                 success: true,
-                message: 'Product updated successfully in MongoDB',
+                message: 'Product updated successfully',
                 data: updatedProduct
             });
         } else {
@@ -285,7 +229,7 @@ app.put('/api/products/:id', async (req, res) => {
             if (productIndex === -1) {
                 return res.status(404).json({
                     success: false,
-                    error: 'Product not found in fallback storage'
+                    error: 'Product not found'
                 });
             }
             
@@ -296,7 +240,7 @@ app.put('/api/products/:id', async (req, res) => {
             
             return res.json({
                 success: true,
-                message: 'Product updated successfully in fallback storage',
+                message: 'Product updated successfully',
                 data: fallbackProducts[productIndex]
             });
         }
@@ -319,13 +263,13 @@ app.delete('/api/products/:id', async (req, res) => {
             if (!deletedProduct) {
                 return res.status(404).json({
                     success: false,
-                    error: 'Product not found in MongoDB'
+                    error: 'Product not found'
                 });
             }
             
             return res.json({
                 success: true,
-                message: 'Product deleted successfully from MongoDB',
+                message: 'Product deleted successfully',
                 data: deletedProduct
             });
         } else {
@@ -333,7 +277,7 @@ app.delete('/api/products/:id', async (req, res) => {
             if (productIndex === -1) {
                 return res.status(404).json({
                     success: false,
-                    error: 'Product not found in fallback storage'
+                    error: 'Product not found'
                 });
             }
             
@@ -341,7 +285,7 @@ app.delete('/api/products/:id', async (req, res) => {
             
             return res.json({
                 success: true,
-                message: 'Product deleted successfully from fallback storage',
+                message: 'Product deleted successfully',
                 data: deletedProduct
             });
         }
@@ -363,14 +307,12 @@ app.post('/api/orders', async (req, res) => {
             const newOrder = new Order(orderData);
             const savedOrder = await newOrder.save();
             
-            // Send Discord notification
             await sendDiscordNotification(savedOrder);
             
             return res.json({
                 success: true,
-                message: 'Order created successfully in MongoDB',
-                data: savedOrder,
-                source: 'mongodb'
+                message: 'Order created successfully',
+                data: savedOrder
             });
         } else {
             const newOrder = {
@@ -380,14 +322,12 @@ app.post('/api/orders', async (req, res) => {
             };
             fallbackOrders.push(newOrder);
             
-            // Send Discord notification
             await sendDiscordNotification(newOrder);
             
             return res.json({
                 success: true,
-                message: 'Order created successfully in fallback storage',
-                data: newOrder,
-                source: 'fallback'
+                message: 'Order created successfully in fallback',
+                data: newOrder
             });
         }
     } catch (error) {
@@ -407,15 +347,13 @@ app.get('/api/orders', async (req, res) => {
             return res.json({
                 success: true,
                 data: orders,
-                message: 'Orders retrieved from MongoDB',
-                count: orders.length
+                message: 'Orders retrieved successfully'
             });
         } else {
             return res.json({
                 success: true,
                 data: fallbackOrders,
-                message: 'Orders retrieved from fallback storage',
-                count: fallbackOrders.length
+                message: 'Orders retrieved from fallback'
             });
         }
     } catch (error) {
@@ -423,8 +361,7 @@ app.get('/api/orders', async (req, res) => {
         res.json({
             success: true,
             data: fallbackOrders,
-            message: 'Orders retrieved from fallback storage (error)',
-            count: fallbackOrders.length
+            message: 'Orders retrieved from fallback (error)'
         });
     }
 });
@@ -444,13 +381,13 @@ app.put('/api/orders/:id', async (req, res) => {
             if (!updatedOrder) {
                 return res.status(404).json({
                     success: false,
-                    error: 'Order not found in MongoDB'
+                    error: 'Order not found'
                 });
             }
             
             return res.json({
                 success: true,
-                message: 'Order status updated successfully in MongoDB',
+                message: 'Order status updated successfully',
                 data: updatedOrder
             });
         } else {
@@ -458,14 +395,14 @@ app.put('/api/orders/:id', async (req, res) => {
             if (!order) {
                 return res.status(404).json({
                     success: false,
-                    error: 'Order not found in fallback storage'
+                    error: 'Order not found'
                 });
             }
             
             order.status = status;
             return res.json({
                 success: true,
-                message: 'Order status updated successfully in fallback storage',
+                message: 'Order status updated successfully',
                 data: order
             });
         }
@@ -483,38 +420,25 @@ app.post('/api/admin/login', async (req, res) => {
     try {
         const { username, password } = req.body;
         
-        if (isMongoConnected()) {
-            const admin = await Admin.findOne({ username, password });
-            if (admin) {
-                res.json({
-                    success: true,
-                    message: 'Login successful'
-                });
-            } else {
-                res.status(401).json({
-                    success: false,
-                    error: 'Invalid credentials'
-                });
-            }
+        console.log('🔐 Login attempt:', { username, password });
+        
+        // Simple hardcoded admin login
+        if (username === 'admin' && password === 'lvime2025') {
+            return res.json({
+                success: true,
+                message: 'Login successful'
+            });
         } else {
-            // Fallback admin credentials
-            if (username === 'admin' && password === 'lvime2025') {
-                res.json({
-                    success: true,
-                    message: 'Login successful (fallback mode)'
-                });
-            } else {
-                res.status(401).json({
-                    success: false,
-                    error: 'Invalid credentials'
-                });
-            }
+            return res.status(401).json({
+                success: false,
+                error: 'Invalid credentials'
+            });
         }
     } catch (error) {
-        console.error('❌ Error in POST /api/admin/login:', error.message);
+        console.error('❌ Login error:', error);
         res.status(500).json({
             success: false,
-            error: error.message
+            error: 'Internal server error'
         });
     }
 });
@@ -525,23 +449,16 @@ app.get('/', (req, res) => {
         success: true,
         message: 'Las Valkyrie API is running!',
         timestamp: new Date().toISOString(),
-        environment: process.env.NODE_ENV || 'production',
-        version: '2.0.0',
         database: {
-            status: isMongoConnected() ? 'connected' : 'disconnected',
-            name: 'las_valkyrie'
+            status: isMongoConnected() ? 'connected' : 'disconnected'
         }
     });
 });
-
-// Initialize admin on startup
-initializeAdmin();
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`📍 Health check: http://localhost:${PORT}/`);
-    console.log(`📍 MongoDB Status: ${isMongoConnected() ? 'Connected' : 'Disconnected'}`);
 });
 
 module.exports = app;
