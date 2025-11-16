@@ -4,6 +4,11 @@ const cors = require('cors');
 
 const app = express();
 
+
+require('dotenv').config(); // Tambahkan ini
+const express = require('express');
+const mongoose = require('mongoose');
+
 // CORS configuration
 app.use(cors({
     origin: '*',
