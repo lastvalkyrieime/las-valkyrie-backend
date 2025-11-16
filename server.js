@@ -1,7 +1,6 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-require('dotenv').config();
 
 const app = express();
 
@@ -10,7 +9,9 @@ app.use(cors());
 app.use(express.json());
 
 // Koneksi MongoDB
-mongoose.connect(process.env.MONGODB_URI, {
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/las_valkyrie';
+
+mongoose.connect(MONGODB_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true,
 })
@@ -26,7 +27,7 @@ app.get('/', (req, res) => {
         success: true,
         message: 'Las Valkyrie API is running!',
         timestamp: new Date().toISOString(),
-        environment: process.env.NODE_ENV || 'development',
+        environment: process.env.NODE_ENV || 'production',
         version: '2.0.0',
         database: {
             status: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
@@ -55,3 +56,5 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
 });
+
+module.exports = app;
