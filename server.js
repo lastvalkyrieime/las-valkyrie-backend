@@ -5,8 +5,6 @@ const axios = require('axios');
 
 const app = express();
 
-require('dotenv').config();
-
 // CORS configuration
 app.use(cors({
     origin: '*',
@@ -19,53 +17,22 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// MongoDB Connection - FIXED VERSION
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://lastvalkyrieime_db_user:lvime2025@lvresourcedatabase.9wth93k.mongodb.net/las_valkyrie?retryWrites=true&w=majority';
+// Health check route (PENTING untuk Vercel)
+app.get('/', (req, res) => {
+    res.json({ 
+        message: 'Las Valkyrie Backend is running!',
+        timestamp: new Date().toISOString(),
+        mongodb_status: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+    });
+});
+
+// MongoDB Connection - VERCEL OPTIMIZED
+const MONGODB_URI = process.env.MONGODB_URI;
 
 console.log('🔧 Initializing MongoDB connection...');
+console.log('MongoDB URI available:', !!MONGODB_URI);
 
-const connectDB = async () => {
-    try {
-        await mongoose.connect(MONGODB_URI);
-        console.log('✅ MongoDB Connected Successfully to las_valkyrie database');
-        
-        // Check if collections exist, create if not
-        const db = mongoose.connection.db;
-        const collections = await db.listCollections().toArray();
-        const collectionNames = collections.map(col => col.name);
-        
-        if (!collectionNames.includes('products')) {
-            await db.createCollection('products');
-            console.log('✅ Created products collection');
-        }
-        
-        if (!collectionNames.includes('orders')) {
-            await db.createCollection('orders');
-            console.log('✅ Created orders collection');
-        }
-        
-        if (!collectionNames.includes('admins')) {
-            await db.createCollection('admins');
-            console.log('✅ Created admins collection');
-            
-            // Insert default admin user
-            const Admin = mongoose.model('Admin', adminSchema);
-            await Admin.create({
-                username: 'admin',
-                password: 'lvime2025'
-            });
-            console.log('✅ Created default admin user');
-        }
-        
-    } catch (error) {
-        console.error('❌ MongoDB Connection Error:', error.message);
-        console.log('⚠️  Using fallback mode (in-memory storage)');
-    }
-};
-
-connectDB();
-
-// MongoDB Schemas
+// MongoDB Schemas (DEFINE SEBELUM CONNECTION)
 const productSchema = new mongoose.Schema({
     name: { type: String, required: true },
     category: { 
@@ -78,12 +45,12 @@ const productSchema = new mongoose.Schema({
     description: { type: String, default: '' }
 }, { 
     timestamps: true,
-    collection: 'products' // Explicit collection name
+    collection: 'products'
 });
 
 const orderSchema = new mongoose.Schema({
     customerName: { type: String, required: true },
-    discordId: { type: String, default: '' }, // Made optional
+    discordId: { type: String, default: '' },
     additionalInfo: { type: String, default: '' },
     items: [{
         productId: String,
@@ -96,7 +63,7 @@ const orderSchema = new mongoose.Schema({
     status: { type: String, default: 'pending' }
 }, { 
     timestamps: true,
-    collection: 'orders' // Explicit collection name
+    collection: 'orders'
 });
 
 const adminSchema = new mongoose.Schema({
@@ -104,7 +71,7 @@ const adminSchema = new mongoose.Schema({
     password: { type: String, required: true }
 }, { 
     timestamps: true,
-    collection: 'admins' // Explicit collection name
+    collection: 'admins'
 });
 
 const Product = mongoose.model('Product', productSchema);
@@ -124,6 +91,33 @@ const fallbackProducts = [
 ];
 
 let fallbackOrders = [];
+
+// Improved MongoDB connection with timeout
+const connectDB = async () => {
+    try {
+        if (!MONGODB_URI) {
+            console.log('❌ MONGODB_URI not found in environment variables');
+            return;
+        }
+
+        // Connection options for better performance
+        const options = {
+            maxPoolSize: 10,
+            serverSelectionTimeoutMS: 5000,
+            socketTimeoutMS: 45000,
+        };
+
+        await mongoose.connect(MONGODB_URI, options);
+        console.log('✅ MongoDB Connected Successfully');
+        
+    } catch (error) {
+        console.error('❌ MongoDB Connection Error:', error.message);
+        console.log('⚠️  Using fallback mode (in-memory storage)');
+    }
+};
+
+// Connect to MongoDB
+connectDB();
 
 // Check MongoDB connection
 function isMongoConnected() {
@@ -180,11 +174,10 @@ const sendDiscordNotification = async (order) => {
 // ===== PRODUCT ROUTES =====
 app.post('/api/products', async (req, res) => {
     try {
-        console.log('➕ POST /api/products called:', req.body);
+        console.log('➕ POST /api/products called');
         
         const productData = req.body;
         
-        // Validation
         if (!productData.name || !productData.category || !productData.price || !productData.stock) {
             return res.status(400).json({
                 success: false,
@@ -196,15 +189,12 @@ app.post('/api/products', async (req, res) => {
             const newProduct = new Product(productData);
             const savedProduct = await newProduct.save();
             
-            console.log('✅ Product saved to MongoDB:', savedProduct._id);
-            
             return res.json({
                 success: true,
                 message: 'Product created successfully',
                 data: savedProduct
             });
         } else {
-            // Add to fallback data
             const newProduct = {
                 _id: 'prod_' + Date.now(),
                 ...productData,
@@ -212,8 +202,6 @@ app.post('/api/products', async (req, res) => {
                 updatedAt: new Date().toISOString()
             };
             fallbackProducts.push(newProduct);
-            
-            console.log('✅ Product saved to fallback storage');
             
             return res.json({
                 success: true,
@@ -229,8 +217,6 @@ app.post('/api/products', async (req, res) => {
         });
     }
 });
-
-// ... (other routes remain the same as before)
 
 app.get('/api/products', async (req, res) => {
     try {
@@ -261,11 +247,10 @@ app.get('/api/products', async (req, res) => {
 // ===== ORDER ROUTES =====
 app.post('/api/orders', async (req, res) => {
     try {
-        console.log('🛒 POST /api/orders called:', req.body);
+        console.log('🛒 POST /api/orders called');
         
         const orderData = req.body;
         
-        // Validation
         if (!orderData.customerName || !orderData.items || orderData.items.length === 0) {
             return res.status(400).json({
                 success: false,
@@ -277,10 +262,7 @@ app.post('/api/orders', async (req, res) => {
             const newOrder = new Order(orderData);
             const savedOrder = await newOrder.save();
             
-            // Send Discord notification
             await sendDiscordNotification(savedOrder);
-            
-            console.log('✅ Order saved to MongoDB:', savedOrder._id);
             
             return res.json({
                 success: true,
@@ -288,7 +270,6 @@ app.post('/api/orders', async (req, res) => {
                 data: savedOrder
             });
         } else {
-            // Add to fallback orders
             const newOrder = {
                 _id: 'order_' + Date.now(),
                 ...orderData,
@@ -297,10 +278,7 @@ app.post('/api/orders', async (req, res) => {
             };
             fallbackOrders.push(newOrder);
             
-            // Send Discord notification
             await sendDiscordNotification(newOrder);
-            
-            console.log('✅ Order saved to fallback storage');
             
             return res.json({
                 success: true,
@@ -317,13 +295,48 @@ app.post('/api/orders', async (req, res) => {
     }
 });
 
-// ... (other routes remain the same)
-
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`📍 Health check: http://localhost:${PORT}/`);
-    console.log(`📍 MongoDB Status: ${isMongoConnected() ? 'Connected' : 'Disconnected'}`);
+app.get('/api/orders', async (req, res) => {
+    try {
+        if (isMongoConnected()) {
+            const orders = await Order.find().sort({ createdAt: -1 });
+            return res.json({
+                success: true,
+                data: orders,
+                message: 'Orders retrieved from MongoDB'
+            });
+        } else {
+            return res.json({
+                success: true,
+                data: fallbackOrders,
+                message: 'Orders retrieved from fallback storage'
+            });
+        }
+    } catch (error) {
+        console.error('❌ Error in /api/orders:', error.message);
+        res.json({
+            success: true,
+            data: fallbackOrders,
+            message: 'Orders retrieved from fallback storage (error)'
+        });
+    }
 });
 
+// Error handling middleware
+app.use((error, req, res, next) => {
+    console.error('🚨 Unhandled Error:', error);
+    res.status(500).json({
+        success: false,
+        error: 'Internal server error'
+    });
+});
+
+// 404 handler
+app.use('*', (req, res) => {
+    res.status(404).json({
+        success: false,
+        error: 'Route not found'
+    });
+});
+
+// Export untuk Vercel (PENTING)
 module.exports = app;
